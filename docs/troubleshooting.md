@@ -1,0 +1,73 @@
+# Troubleshooting
+
+## Common Issues
+
+### Webhook returns 404 even though workflow is active
+
+**Cause:** n8n webhooks created or activated via API don't register in n8n's internal routing table.
+
+**Fix:** Open the workflow in the n8n editor UI, delete the webhook node, add a brand new one from scratch with the same path and settings, save, and activate from the editor. This forces proper webhook registration.
+
+### Meta sends duplicate messages / VAPI makes duplicate calls
+
+**Cause:** Meta retries webhook delivery every ~20 seconds if it doesn't receive a quick response. If the workflow takes too long before responding, Meta fires again.
+
+**Fix:** Set the webhook node to "Respond Immediately" or use a "Respond to Webhook" node on a parallel branch so the 200 response goes back to Meta instantly while the rest of the workflow processes asynchronously.
+
+### VAPI custom tools fail silently or return errors
+
+**Cause:** VAPI's native custom function tools are unreliable, especially with external APIs and complex payloads.
+
+**Fix:** Use the MCP Server pattern instead. Create an n8n workflow with an MCP Server Trigger, connect tool nodes (Call Workflow, Slack, DateTime, etc.) via ai_tool connections, and configure the VAPI assistant with the MCP tool URL. This is the same pattern used by the LR Assistant (`yogUhOOssD2SF0TS`).
+
+### VAPI call reports "I can't access the calendar right now"
+
+**Cause:** The VAPI assistant is using custom tools instead of MCP, or the MCP URL is misconfigured.
+
+**Fix:** Verify VAPI assistant has:
+- MCP Tool URL: `https://n8n.hindsightx.com/mcp/lr-messenger-mcp`
+- Server URL: `https://n8n.hindsightx.com/webhook/lr-messenger-vapi-callback`
+- Both must be set separately. MCP handles live tools, Server URL handles end-of-call reports.
+
+### Phone number format causes VAPI call failure
+
+**Cause:** Google Sheets stores phone numbers as plain numbers (e.g., `2019696773`). VAPI requires E.164 format with `+` prefix.
+
+**Fix:** Use `+1{{ expression }}` in the VAPI Call node's JSON body — prefix with `+1` directly in the expression, not in the Sheets data.
+
+### WF3 doesn't update the Google Sheet after a call
+
+**Cause:** VAPI sends many intermediate webhook events during calls (speech-update, transcript, etc.). If the filter node isn't strict, these events bypass the filter and cause issues.
+
+**Fix:** The "Filter: End of Call Only" node must check `message.type === "end-of-call-report"` strictly. Only the end-of-call-report contains the full transcript needed for analysis.
+
+### GET webhooks don't work on this n8n instance
+
+**Cause:** n8n is behind a Cloudflare Tunnel which doesn't forward GET requests to webhook paths.
+
+**Fix:** Use a Cloudflare Worker as a proxy for any service that requires GET verification (like Meta). The worker handles GET challenges and forwards POST messages to n8n. See the Cloudflare Worker section in the architecture docs.
+
+### Google Sheets lookup returns empty and workflow stops
+
+**Cause:** By default, Google Sheets lookup nodes terminate the workflow if no matching row is found.
+
+**Fix:** Set `alwaysOutputData: true` on the Google Sheets lookup node so the workflow continues even with empty results. Then handle the empty case with an IF node downstream.
+
+### VAPI assistant asks for name even though it was passed in
+
+**Cause:** The `first_name` variable was passed via `assistantOverrides.variableValues` but the prompt doesn't reference `{{first_name}}` in the opening line, or the variable name doesn't match.
+
+**Fix:** Ensure the prompt uses `{{first_name}}` (matching the exact key in variableValues) and that WF2's VAPI Call node includes the overrides in the JSON body.
+
+## Monitoring
+
+### Check workflow executions
+- **n8n dashboard:** Open each workflow → Executions tab
+- **Slack:** The `send_eocr` tool sends call summaries to the `vapi-broker-assistant` Slack channel during every call
+- **Email:** WF3 sends a detailed email to `info@hindsightx.com` after every completed call
+- **Google Sheets:** The Pipeline sheet shows the progressive state of every lead
+
+### Rate limits
+- **Meta Graph API:** Monitored at developers.facebook.com → App Dashboard. Current usage should stay well under 1% for normal lead volumes.
+- **VAPI:** Check dashboard.vapi.ai for call costs and usage.
+- **Cal.com:** No hard rate limits for booking operations.

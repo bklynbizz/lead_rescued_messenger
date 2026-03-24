@@ -1,0 +1,15 @@
+# Environment and secrets
+.env
+*.secret
+credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+
+# Node modules (if any tooling added later)
+node_modules/

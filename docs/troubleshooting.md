@@ -53,6 +53,24 @@
 
 **Fix:** Set `alwaysOutputData: true` on the Google Sheets lookup node so the workflow continues even with empty results. Then handle the empty case with an IF node downstream.
 
+### Facebook Lead Ad form submissions are dropped / not captured
+
+**Cause:** Facebook Lead Ads with Messenger integration deliver form data as Messenger messages, not as separate webhook POSTs. If WF2 only checks for "yes"/"call me", form submissions get routed to the false branch and discarded.
+
+**Fix:** WF2 now has a form detection branch before the YES check. It looks for "full name:" AND "phone number:" AND "email:" in the message. If all three are present, it's a form submission and gets parsed, logged to the Pipeline sheet, and the lead receives a "Reply YES" message. This was added after Irma Quintero's form submission was lost.
+
+### VAPI makes multiple calls for a single YES reply
+
+**Cause:** The PSID lookup in Google Sheets returned multiple rows (duplicate PSIDs from test data), and the VAPI Call node processed every row — calling every phone number found.
+
+**Fix:** A "Limit to 1 Lead" node was added between the PSID lookup and the update chain. Even if duplicates exist in the sheet, only the first match gets processed. Also: regularly clean up test data from the Pipeline sheet to prevent duplicate PSIDs.
+
+### VAPI call fails with "customer.number must be a valid phone number in E.164 format"
+
+**Cause:** The phone number from the Google Sheet is missing the `+1` country code prefix, or the sheet contains a fake/invalid test number.
+
+**Fix:** The VAPI Call node uses `+1{{ expression }}` to prefix the country code. Ensure test rows use real phone numbers in 10-digit format. Clean up test data after testing.
+
 ### VAPI assistant asks for name even though it was passed in
 
 **Cause:** The `first_name` variable was passed via `assistantOverrides.variableValues` but the prompt doesn't reference `{{first_name}}` in the opening line, or the variable name doesn't match.

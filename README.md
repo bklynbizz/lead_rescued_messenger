@@ -17,18 +17,16 @@ The entire flow — from Messenger reply to live AI phone call — happens in un
 ## Architecture
 
 ```
-Facebook Lead Ad
-    ↓
-WF1: Lead Form to Messenger (avYJfDfznDmiCmE6) [INACTIVE - activate for live ads]
-    ↓  Logs lead → Sends Messenger message → 24hr/48hr follow-up
-    ↓
-Lead replies on Messenger
+Facebook Lead Ad (with Messenger integration)
+    ↓  Form submission arrives as Messenger message
     ↓
 Meta → Cloudflare Worker (meta-verify.bklynbizz.workers.dev) → POST to n8n
     ↓
-WF2: YES Reply Handler (o8ppK68l72hAbkQ7) [ACTIVE]
-    ↓  Detects YES → Looks up lead by PSID → Updates sheet
-    ↓  Sends confirmation → Waits 30s → Triggers VAPI call
+WF2: Messenger Handler (o8ppK68l72hAbkQ7) [ACTIVE]
+    ↓  Branch 1: Form Submission detected (contains "full name:" + "phone number:" + "email:")
+    ↓    → Parse form data → Log to Pipeline sheet → Send "Reply YES" message
+    ↓  Branch 2: YES reply detected (exact "yes" or "call me")
+    ↓    → Lookup lead by PSID → Limit to 1 → Send confirmation → Wait 30s → VAPI call
     ↓
 VAPI Call (Assistant: 2f38f6d4-e432-436b-851e-c58e7499d06a)
     ↓  Uses MCP Server for live tools during call
@@ -49,10 +47,12 @@ WF3: VAPI Callback & Discovery Booked (jCqpuKEW4ba0czwD) [ACTIVE]
 
 | ID | Name | Status | Webhook Path |
 |----|------|--------|-------------|
-| `avYJfDfznDmiCmE6` | LR Messenger - Lead Form to Messenger | Inactive | `lr-messenger-lead` |
+| `avYJfDfznDmiCmE6` | LR Messenger - Lead Form to Messenger | **Deprecated** | `lr-messenger-lead` |
 | `o8ppK68l72hAbkQ7` | LR Messenger - YES Reply Handler | **Active** | `lr-messenger-reply` |
 | `jCqpuKEW4ba0czwD` | LR Messenger - VAPI Callback & Discovery Booked | **Active** | `lr-messenger-vapi-callback` |
 | `y7ETGVZgAUUv4CzP` | LR Messenger Assistant (MCP) | **Active** | `lr-messenger-mcp` (MCP path) |
+
+> **Note:** WF1 is deprecated. Facebook Lead Ads with Messenger integration deliver form data as Messenger messages, which go directly to WF2 via the Cloudflare Worker. WF2 now handles both form submissions AND YES replies in a single workflow. WF1 never receives traffic and can be deactivated.
 
 ### Shared Subworkflows (called by MCP Assistant)
 
@@ -136,6 +136,12 @@ The Cloudflare Worker handles Meta's GET verification challenge (n8n behind Clou
 
 8. **MCP vs Server URL:** The MCP tool URL handles live tools during calls. The Server URL receives all webhook events including end-of-call reports. Both must be configured separately in VAPI.
 
+9. **Facebook Lead Ads + Messenger:** When using Messenger integration on Lead Ads, form submissions arrive as Messenger messages (not separate webhook POSTs). The form data comes as a multi-line text message with field labels like "full name:", "phone number:", "email:". WF2 must detect and handle both form submissions and YES replies.
+
+10. **Form detection guardrail:** Check for ALL THREE labels ("full name:", "phone number:", "email:") to distinguish form submissions from regular conversation. A single field match (e.g., someone texting just a phone number) won't trigger the form branch.
+
+11. **Duplicate PSID protection:** Always add a Limit node after PSID lookups to prevent duplicate rows from triggering multiple VAPI calls. Without this, if a PSID appears in multiple sheet rows, the VAPI Call node fires for each match.
+
 ## Credentials Reference
 
 | Name | Type | n8n ID | Used By |
@@ -149,15 +155,9 @@ The Cloudflare Worker handles Meta's GET verification challenge (n8n behind Clou
 | Pinecone HTTP Auth | httpHeaderAuth | `FZcg38lsPEvJOJPe` | KB Subworkflow |
 | Cal.com Calendar | Cal API | `6hbxKH0r3buvlQZI` | Booking Subworkflows |
 
-## Activating WF1 for Live Ads
+## WF1 Deprecation Note
 
-When ready to run Facebook Lead Ads:
-
-1. Open WF1 (`avYJfDfznDmiCmE6`) in n8n editor
-2. Delete the existing webhook node and recreate it manually (POST, path: `lr-messenger-lead`, Respond: Immediately)
-3. Reconnect to "Extract Lead Data" node
-4. Save and activate
-5. Configure your Facebook Lead Ad to POST lead data to the Cloudflare Worker or directly to n8n
+WF1 (`avYJfDfznDmiCmE6`) was originally designed to receive lead form data via a separate webhook. However, Facebook Lead Ads with Messenger integration deliver form submissions as Messenger messages to the page, which route through the Cloudflare Worker to WF2. WF2 now detects form submissions (by checking for "full name:", "phone number:", and "email:" in the message) and handles them directly — parsing the data, logging to the Pipeline sheet, and sending the "Reply YES" message. WF1 never fires and can remain inactive or be deactivated.
 
 ## License
 

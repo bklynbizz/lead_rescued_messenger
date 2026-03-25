@@ -1,10 +1,11 @@
 # Workflow Details
 
-## WF1: Lead Form to Messenger (`avYJfDfznDmiCmE6`)
+## WF1: Lead Form to Messenger (`avYJfDfznDmiCmE6`) — DEPRECATED
 
-**Status:** Inactive (activate when Facebook Lead Ads go live)
+**Status:** Deprecated (active but never fires)
 **Path:** `lr-messenger-lead`
-**Trigger:** POST webhook from Facebook Lead Ad submission
+
+> **This workflow is superseded by WF2's form detection branch.** Facebook Lead Ads with Messenger integration deliver form submissions as Messenger messages, which route through the Cloudflare Worker to WF2. WF1's separate webhook path never receives traffic. It can be deactivated or kept as a backup for non-Messenger lead ad setups.
 
 ### Node Flow
 
@@ -43,21 +44,54 @@ Facebook Lead Ads Trigger (POST webhook)
 **Path:** `lr-messenger-reply`
 **Trigger:** POST from Cloudflare Worker (forwarded from Meta)
 
-### Node Flow
+### Node Flow (15 nodes)
 
 ```
 Webhook (POST, Respond Immediately)
   ├── Respond OK ("EVENT_RECEIVED")
   └── Extract Message (psid, message text lowercased)
-      └── Check if YES (regex: ^(yes|call me)$)
-          ├── TRUE → Lookup Lead in Pipeline (by Messenger PSID)
-          │   └── Update: YES Received (YES Reply = TRUE, Status = AI Called)
-          │       └── Send Confirmation via Messenger
-          │           └── Wait 30s
-          │               └── VAPI Call (outbound phone call)
-          │                   └── Update: AI Call Initiated (TRUE)
-          └── FALSE → (ignore non-YES messages)
+      └── Is Form Submission? (contains "full name:" AND "phone number:" AND "email:")
+          ├── TRUE (Form Branch):
+          │   └── Parse Form Data (Code: extracts first_name, last_name, phone, email, is_licensed)
+          │       └── Log Lead to Pipeline (append row to Google Sheet)
+          │           └── Send Initial Messenger Msg ("Reply YES and our AI will call you back")
+          │               └── Update Message Sent (Initial Message Sent = TRUE, Status = Contacted)
+          │
+          └── FALSE (Reply Branch):
+              └── Check if YES (regex: ^(yes|call me)$)
+                  ├── TRUE → Lookup Lead in Pipeline (by Messenger PSID)
+                  │   └── Limit to 1 Lead (prevents duplicate PSID matches)
+                  │       └── Update: YES Received (YES Reply = TRUE, Status = AI Called)
+                  │           └── Send Confirmation via Messenger
+                  │               └── Wait 30s
+                  │                   └── VAPI Call (outbound phone call)
+                  │                       └── Update: AI Call Initiated (TRUE)
+                  └── FALSE → (ignore non-YES messages)
 ```
+
+### Form Detection Logic
+
+Facebook Lead Ads with Messenger integration deliver form submissions as regular Messenger messages. The form data arrives as multi-line text:
+
+```
+Are you a licensed real estate agent or broker?: Yes
+Full name: Irma Quintero
+Phone number: (773) 875-3935
+Email: isanchez4343@yahoo.com
+```
+
+The "Is Form Submission" IF node checks for ALL THREE labels — "full name:", "phone number:", AND "email:" — using case-insensitive string contains. All three must be present (AND combinator) to trigger the form branch. This prevents false positives from normal conversation messages.
+
+### Parse Form Data (Code Node)
+
+Splits the message by newlines and extracts values by matching field labels. Also:
+- Splits full name into first_name and last_name
+- Strips non-digit characters from phone number
+- Extracts "licensed" field if present
+
+### Duplicate PSID Protection
+
+A "Limit to 1 Lead" node sits between the PSID lookup and the YES processing chain. If duplicate PSIDs exist in the sheet (e.g., from test data), only the first match proceeds. Without this, the VAPI Call node would fire for each matching row.
 
 ### Key Configuration
 

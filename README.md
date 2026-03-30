@@ -4,9 +4,10 @@ An automated lead capture and AI voice qualification pipeline that converts Face
 
 ## What It Does
 
-1. **Lead submits a Facebook Lead Ad form** → captured in Google Sheets Pipeline
-2. **n8n sends a Messenger message** prompting the lead to reply "YES"
-3. **Lead replies YES** → n8n detects it, sends confirmation, waits 30 seconds
+1. **Lead submits a Facebook Lead Ad form** → form data arrives via Messenger → captured in Google Sheets Pipeline
+2. **n8n sends a Messenger message** prompting the lead to reply "YES" (with SMS fallback number)
+3. **2 minutes later, n8n sends an SMS** via Twilio to the lead's phone with the same "Reply YES" prompt
+4. **Lead replies YES** (via Messenger or SMS) → n8n detects it, sends confirmation, waits 30 seconds
 4. **VAPI AI calls the lead** — qualifies them (business type, missed calls/week, follow-up behavior)
 5. **AI checks calendar availability** and books a discovery call with Curtis live on the phone
 6. **AI sends confirmation email** to the lead and Slack summary to Curtis
@@ -24,7 +25,8 @@ Meta → Cloudflare Worker (meta-verify.bklynbizz.workers.dev) → POST to n8n
     ↓
 WF2: Messenger Handler (o8ppK68l72hAbkQ7) [ACTIVE]
     ↓  Branch 1: Form Submission detected (contains "full name:" + "phone number:" + "email:")
-    ↓    → Parse form data → Log to Pipeline sheet → Send "Reply YES" message
+    ↓    → Parse form data → Log to Pipeline sheet → Send "Reply YES" Messenger message
+    ↓    → Wait 2 min → Send SMS follow-up via Twilio (657-567-6219)
     ↓  Branch 2: YES reply detected (exact "yes" or "call me")
     ↓    → Lookup lead by PSID → Limit to 1 → Send confirmation → Wait 30s → VAPI call
     ↓
@@ -154,6 +156,7 @@ The Cloudflare Worker handles Meta's GET verification challenge (n8n behind Clou
 | Hindsight X (Slack) | Slack OAuth2 | `zVtQzNM35hjCi74m` | MCP Assistant |
 | Pinecone HTTP Auth | httpHeaderAuth | `FZcg38lsPEvJOJPe` | KB Subworkflow |
 | Cal.com Calendar | Cal API | `6hbxKH0r3buvlQZI` | Booking Subworkflows |
+| Twilio Auth | httpBasicAuth | `ekgqR0Hfg8pCnZdJ` | WF2 (SMS Follow-Up) |
 
 ## WF1 Deprecation Note
 

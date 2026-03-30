@@ -54,8 +54,10 @@ Webhook (POST, Respond Immediately)
           ├── TRUE (Form Branch):
           │   └── Parse Form Data (Code: extracts first_name, last_name, phone, email, is_licensed)
           │       └── Log Lead to Pipeline (append row to Google Sheet)
-          │           └── Send Initial Messenger Msg ("Reply YES and our AI will call you back")
+          │           └── Send Initial Messenger Msg (Reply YES + SMS fallback number)
           │               └── Update Message Sent (Initial Message Sent = TRUE, Status = Contacted)
+          │                   └── Wait 2 Minutes
+          │                       └── Send SMS Follow-Up (Twilio: text YES to 657-567-6219)
           │
           └── FALSE (Reply Branch):
               └── Check if YES (regex: ^(yes|call me)$)
@@ -68,6 +70,18 @@ Webhook (POST, Respond Immediately)
                   │                       └── Update: AI Call Initiated (TRUE)
                   └── FALSE → (ignore non-YES messages)
 ```
+
+### Messenger & SMS Messages
+
+**Initial Messenger Message (on form submission):**
+"Hey {first_name}, reply YES right now and our AI will call you back in 30 seconds to give you the full Lead Rescued experience.
+
+No Messenger? Text YES to (657) 567-6219 and we'll call you right back."
+
+**SMS Follow-Up (2 minutes after form submission, via Twilio):**
+"Hey {first_name}, this is Lead Rescued. Reply YES to this text and our AI will call you back in 30 seconds. Text YES to (657) 567-6219."
+
+The SMS fires automatically 2 minutes after the Messenger message, giving leads a second channel to engage in case they don't check Messenger.
 
 ### Form Detection Logic
 

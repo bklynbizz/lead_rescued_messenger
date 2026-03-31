@@ -44,32 +44,57 @@ Facebook Lead Ads Trigger (POST webhook)
 **Path:** `lr-messenger-reply`
 **Trigger:** POST from Cloudflare Worker (forwarded from Meta)
 
-### Node Flow (15 nodes)
+### Node Flow (30 nodes)
 
 ```
 Webhook (POST, Respond Immediately)
-  ├── Respond OK ("EVENT_RECEIVED")
-  └── Extract Message (psid, message text lowercased)
-      └── Is Form Submission? (contains "full name:" AND "phone number:" AND "email:")
-          ├── TRUE (Form Branch):
-          │   └── Parse Form Data (Code: extracts first_name, last_name, phone, email, is_licensed)
-          │       └── Log Lead to Pipeline (append row to Google Sheet)
-          │           └── Send Initial Messenger Msg (Reply YES + SMS fallback number)
-          │               └── Update Message Sent (Initial Message Sent = TRUE, Status = Contacted)
-          │                   └── Wait 2 Minutes
-          │                       └── Send SMS Follow-Up (Twilio: text YES to 657-567-6219)
-          │
-          └── FALSE (Reply Branch):
-              └── Check if YES (regex: ^(yes|call me)$)
-                  ├── TRUE → Lookup Lead in Pipeline (by Messenger PSID)
-                  │   └── Limit to 1 Lead (prevents duplicate PSID matches)
-                  │       └── Update: YES Received (YES Reply = TRUE, Status = AI Called)
-                  │           └── Send Confirmation via Messenger
-                  │               └── Wait 30s
-                  │                   └── VAPI Call (outbound phone call)
-                  │                       └── Update: AI Call Initiated (TRUE)
-                  └── FALSE → (ignore non-YES messages)
+  └── Is SMS from Twilio? (has Body field in payload)
+      │
+      ├── TRUE (SMS Branch — 11 nodes):
+      │   └── Extract SMS Data (From, To, Body)
+      │       └── SMS Check YES (regex: ^(yes|call me)$)
+      │           ├── TRUE:
+      │           │   └── Lookup Client Config (by To number → gets assistant ID)
+      │           │       └── SMS Lookup by Phone (Pipeline sheet)
+      │           │           └── SMS Limit 1
+      │           │               └── SMS Update YES (YES Reply = TRUE, Status = AI Called)
+      │           │                   └── SMS Confirmation (Twilio text back)
+      │           │                       └── SMS Prepare VAPI (captures data before Wait)
+      │           │                           └── SMS Wait 30s
+      │           │                               └── SMS VAPI Call (dynamic assistant from Config)
+      │           │                                   └── SMS Update Call (AI Call Initiated = TRUE)
+      │           └── FALSE → (ignore non-YES texts)
+      │
+      └── FALSE (Messenger Branch — 18 nodes):
+          └── Extract Message (psid, message text lowercased)
+              └── Is Form Submission? (contains "full name:" AND "phone number:" AND "email:")
+                  │
+                  ├── TRUE (Form Branch):
+                  │   └── Parse Form Data (Code: extracts first_name, last_name, phone, email, is_licensed)
+                  │       └── Log Lead to Pipeline (append row to Google Sheet)
+                  │           └── Send Initial Messenger Msg (Reply YES + SMS fallback number)
+                  │               └── Update Message Sent (Initial Message Sent = TRUE, Status = Contacted)
+                  │                   └── Prepare SMS Data (captures phone + name before Wait)
+                  │                       └── Wait 2 Minutes
+                  │                           └── Send SMS Follow-Up (Twilio: text YES to 657-567-6219)
+                  │
+                  └── FALSE (YES Reply Branch):
+                      └── Check if YES (regex: ^(yes|call me)$)
+                          ├── TRUE → Lookup Lead in Pipeline (by Messenger PSID)
+                          │   └── Limit to 1 Lead
+                          │       └── Update: YES Received (YES Reply = TRUE, Status = AI Called)
+                          │           └── Send Confirmation via Messenger
+                          │               └── Wait 30s
+                          │                   └── VAPI Call (outbound phone call, hardcoded assistant)
+                          │                       └── Update: AI Call Initiated (TRUE)
+                          └── FALSE → (ignore non-YES messages)
 ```
+
+### SMS Branch — Dynamic Client Routing
+
+The SMS branch uses the `To` number from Twilio's payload to determine which client's assistant to use. After detecting a YES reply, it looks up the `To` number in the **Client Config** sheet, which returns the correct VAPI Assistant ID and Phone Number ID for that client. This allows multiple clients to share the same Twilio Messaging Service webhook.
+
+The "SMS Prepare VAPI" Set node captures the phone, first_name, email, assistant_id, and phone_number_id before the Wait 30s node — essential because upstream node references break after Wait nodes resume.
 
 ### Messenger & SMS Messages
 

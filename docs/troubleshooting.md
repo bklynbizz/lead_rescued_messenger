@@ -71,6 +71,38 @@
 
 **Fix:** The VAPI Call node uses `+1{{ expression }}` to prefix the country code. Ensure test rows use real phone numbers in 10-digit format. Clean up test data after testing.
 
+### SMS replies trigger the wrong VAPI assistant
+
+**Cause 1 — Twilio Messaging Service:** If the phone number is assigned to a Twilio Messaging Service, the service's webhook configuration overrides the individual phone number's webhook URL. The SMS may be routing to a different n8n workflow (e.g., the old Iron Maiden `twilio-sms-simple` path) even though the phone number's webhook shows the correct URL.
+
+**Fix:** Check the Messaging Service settings (Twilio → Messaging → Services → [service name] → Integration → Incoming Messages) and update the webhook URL there.
+
+**Cause 2 — VAPI SMS Enabled:** If "SMS Enabled" is toggled on in the VAPI Dashboard for the phone number, VAPI intercepts all inbound SMS before Twilio's webhook fires.
+
+**Fix:** Disable "SMS Enabled" in VAPI Dashboard → Phone Numbers → [number] so Twilio routes SMS to n8n instead.
+
+**Cause 3 — Wrong workflow intercepting:** Another active workflow may have a webhook that Twilio is still pointing to. Check all active workflows for Twilio webhook paths.
+
+**Fix:** Use the n8n workflow list to identify which workflow is actually receiving executions. The `twilio-sms-simple` path belonged to the Iron Maiden workflow (`CL7Bg9YNwdLv7OP4`), which has been deactivated.
+
+### Wait node loses upstream data — Twilio SMS or VAPI call fails after Wait
+
+**Cause:** n8n Wait nodes resume as a new execution context. References to upstream nodes like `$('Parse Form Data').item.json.phone` return empty after the Wait resumes.
+
+**Fix:** Add a Set node ("Prepare SMS Data" or "SMS Prepare VAPI") immediately before the Wait node that explicitly captures all needed values into `$json` fields. After the Wait, reference `$json.phone` instead of upstream node names.
+
+### Twilio SMS returns empty body or "A 'To' phone number is required"
+
+**Cause:** The HTTP Request node is configured with the wrong content type. Twilio requires form-urlencoded with keypair parameters, not JSON or multipart-form-data.
+
+**Fix:** Set the HTTP Request node to: `contentType: form-urlencoded`, `specifyBody: keypair`, then add From, To, and Body as keypair parameters.
+
+### n8n webhook returns 404 on API-created workflows even after manual recreation
+
+**Cause:** Some n8n instances (particularly behind Cloudflare Tunnel) fail to register webhooks on workflows originally created via the API, even when the webhook node is manually recreated in the editor.
+
+**Fix:** Add the functionality to an existing workflow that already has a working webhook. WF2 (`lr-messenger-reply`) was created in the editor and works reliably. The SMS handling was added to WF2 instead of a separate workflow for this reason.
+
 ### VAPI assistant asks for name even though it was passed in
 
 **Cause:** The `first_name` variable was passed via `assistantOverrides.variableValues` but the prompt doesn't reference `{{first_name}}` in the opening line, or the variable name doesn't match.
